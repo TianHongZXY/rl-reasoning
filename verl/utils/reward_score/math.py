@@ -12,18 +12,37 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Adapted from https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/hendrycks_math/utils.py
+import random
 
 
 def compute_score(solution_str, ground_truth) -> float:
-    retval = 0.
+    retval = -1
+    do_print = random.randint(1, 128) == 1
     try:
         string_in_last_boxed = last_boxed_only_string(solution_str)
         if string_in_last_boxed is not None:
             answer = remove_boxed(string_in_last_boxed)
-            if is_equiv(answer, ground_truth):
+            if is_equiv(answer, ground_truth['target']):
                 retval = 1.
     except Exception as e:
+        # retval = -1.
+        answer = "None"
         print(e)
+
+    if do_print:
+        print(f"--------------------------------")
+        print(f"Question: {ground_truth['question']}")
+        print(f"Solution: {solution_str}")
+        print(f"Ground Truth: {ground_truth['target']}")
+        print(f"Extracted answer: {answer}")
+        if retval == 1.:
+            print(f"Correct answer! Reward = {retval}")
+        else:
+            print(f"Incorrect answer. Reward = {retval}")
+        # elif retval == -0.5:
+        #     print("Incorrect answer. Reward - 0.5")
+        # else:
+        #     print("Fail to extract answer. Reward - 1")
 
     return retval
 

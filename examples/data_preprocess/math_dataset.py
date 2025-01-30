@@ -54,6 +54,11 @@ if __name__ == '__main__':
 
             answer = example.pop('solution')
             solution = extract_solution(answer)
+            solution = {
+                "question": question,
+                "solution": answer,
+                "target": solution
+            }
             data = {
                 "data_source": data_source,
                 "prompt": [{
