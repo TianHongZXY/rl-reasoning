@@ -33,6 +33,13 @@ def cosfn(t, T, eta_min, eta_max):
     return eta_min + 0.5 * (eta_max - eta_min) * (1 + np.cos(t * np.pi / T))
 
 
+def linear_length_reward_function(C, L_gen, L_max):
+    if C:
+        return -0.5 * L_gen / L_max
+    else:
+        return 0.5 * L_gen / L_max
+
+
 def cosine_reward_function(C, L_gen, L_max):
     """
     Implements the reward function R(C, L_gen) based on Qwen2.5-Math-7B parameters
@@ -65,14 +72,12 @@ def cosine_reward_function(C, L_gen, L_max):
 
 
 def compute_score(solution_str, ground_truth, reward_type="classic", tokenizer=None, max_length=None) -> float:
-    retval = -1
     correct = False
     answer = "None"
     do_print = random.randint(1, 256) == 1
     try:
         answer = extract_answer_math(solution_str)
         if answer == ground_truth['target']:
-            retval = 1.
             correct = True
     except Exception as e:
         print(e)
@@ -80,6 +85,13 @@ def compute_score(solution_str, ground_truth, reward_type="classic", tokenizer=N
     if reward_type == "cosine":
         length = min(len(tokenizer.tokenize(solution_str)), max_length)  # Clip to max_length
         retval = cosine_reward_function(correct, length, max_length)
+    elif reward_type == "classic_length_penalty":
+        length = min(len(tokenizer.tokenize(solution_str)), max_length)  # Clip to max_length
+        retval = linear_length_reward_function(correct, length, max_length)
+    elif reward_type == "classic":
+        retval = 1. if correct else 0.
+    else:
+        raise ValueError(f"Unknown reward type: {reward_type}")
 
     if do_print:
         print(f"--------------------------------")
