@@ -16,6 +16,7 @@ FSDP PPO Trainer with Ray-based single controller.
 This trainer supports model-agonistic model initialization with huggingface
 """
 
+from torchsnooper import snoop
 import os
 import uuid
 from contextlib import contextmanager
@@ -34,6 +35,7 @@ from verl.single_controller.ray import RayResourcePool, RayWorkerGroup, RayClass
 from verl.single_controller.ray.base import create_colocated_worker_cls
 from verl.trainer.ppo import core_algos
 from verl.utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
+from tqdm import tqdm
 
 WorkerType = Type[Worker]
 
@@ -521,15 +523,15 @@ class RayPPOTrainer(object):
     def _save_checkpoint(self):
         actor_local_path = os.path.join(self.config.trainer.default_local_dir, 'actor',
                                         f'global_step_{self.global_steps}')
-        actor_remote_path = None if self.config.trainer.default_hdfs_dir is None else os.path.join(
-            self.config.trainer.default_hdfs_dir, 'actor')
+        actor_remote_path = None # if self.config.trainer.default_hdfs_dir is None else os.path.join(
+            # self.config.trainer.default_hdfs_dir, 'actor')
         self.actor_rollout_wg.save_checkpoint(actor_local_path, actor_remote_path)
 
         if self.use_critic:
             critic_local_path = os.path.join(self.config.trainer.default_local_dir, 'critic',
                                              f'global_step_{self.global_steps}')
-            critic_remote_path = None if self.config.trainer.default_hdfs_dir is None else os.path.join(
-                self.config.trainer.default_hdfs_dir, 'critic')
+            critic_remote_path = None # if self.config.trainer.default_hdfs_dir is None else os.path.join(
+                # self.config.trainer.default_hdfs_dir, 'critic')
             self.critic_wg.save_checkpoint(critic_local_path, critic_remote_path)
 
     def _balance_batch(self, batch: DataProto, metrics, logging_prefix='global_seqlen'):
@@ -549,6 +551,7 @@ class RayPPOTrainer(object):
                                                     prefix=logging_prefix)
         metrics.update(global_balance_stats)
 
+    # @snoop()
     def fit(self):
         """
         The training loop of PPO.
@@ -578,7 +581,8 @@ class RayPPOTrainer(object):
         self.global_steps += 1
 
         for epoch in range(self.config.trainer.total_epochs):
-            for batch_dict in self.train_dataloader:
+            print("-" * 30 + f'Epoch: {epoch}' + "-" * 30)
+            for batch_dict in tqdm(self.train_dataloader):
                 metrics = {}
                 timing_raw = {}
 
@@ -590,6 +594,7 @@ class RayPPOTrainer(object):
                 with _timer('step', timing_raw):
                     # generate a batch
                     with _timer('gen', timing_raw):
+                        # tqdm.write(f'Generating {gen_batch["input_ids"].shape[0]} sequences as experience.')
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
 
                     batch.non_tensor_batch['uid'] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))],
@@ -608,18 +613,23 @@ class RayPPOTrainer(object):
 
                     # recompute old_log_probs
                     with _timer('old_log_prob', timing_raw):
+                        # compute the log_prob from old policy, after update the actor, this can be used to compute kl
+                        # tqdm.write(f'Computing log_prob for {batch.batch["input_ids"].shape[0]} sequences.')
                         old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
                         batch = batch.union(old_log_prob)
 
                     if self.use_reference_policy:
                         # compute reference log_prob
                         with _timer('ref', timing_raw):
+                            # compute the log_prob from reference policy, this is used to constrain the update step, to avoid policy drift
+                            # tqdm.write(f'Computing ref_log_prob for {batch.batch["input_ids"].shape[0]} sequences.')
                             ref_log_prob = self.ref_policy_wg.compute_ref_log_prob(batch)
                             batch = batch.union(ref_log_prob)
 
                     # compute values
                     if self.use_critic:
                         with _timer('values', timing_raw):
+                            # tqdm.write(f'Computing values for {batch.batch["input_ids"].shape[0]} sequences.')
                             values = self.critic_wg.compute_values(batch)
                             batch = batch.union(values)
 
@@ -663,6 +673,7 @@ class RayPPOTrainer(object):
                     if self.config.trainer.critic_warmup <= self.global_steps:
                         # update actor
                         with _timer('update_actor', timing_raw):
+                            # tqdm.write(f'Updating actor for {batch.batch["input_ids"].shape[0]} sequences.')
                             actor_output = self.actor_rollout_wg.update_actor(batch)
                         actor_output_metrics = reduce_metrics(actor_output.meta_info['metrics'])
                         metrics.update(actor_output_metrics)
