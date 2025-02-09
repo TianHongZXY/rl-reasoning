@@ -12,22 +12,74 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Adapted from https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/hendrycks_math/utils.py
+import numpy as np
 import random
+from .utils import extract_answer_math
 
 
-def compute_score(solution_str, ground_truth) -> float:
+def cosfn(t, T, eta_min, eta_max):
+    """
+    Implements the cosine function for reward scaling
+    
+    Args:
+        t: Current value (e.g., generation length)
+        T: Maximum value (e.g., maximum length)
+        eta_min: Minimum value for scaling
+        eta_max: Maximum value for scaling
+    
+    Returns:
+        float: Scaled value based on cosine function
+    """
+    return eta_min + 0.5 * (eta_max - eta_min) * (1 + np.cos(t * np.pi / T))
+
+
+def cosine_reward_function(C, L_gen, L_max):
+    """
+    Implements the reward function R(C, L_gen) based on Qwen2.5-Math-7B parameters
+    
+    Args:
+        C: Correctness (True or False)
+        L_gen: Generation length
+        L_max: Maximum length
+    
+    Returns:
+        float: Calculated reward
+    """
+    # Define hyperparameters
+    r0_c = 2.0    # Reward for correct at L_gen = 0
+    rL_c = 1.0    # Reward for correct at L_gen = L_max
+    r0_w = -10.0  # Reward for wrong at L_gen = 0
+    rL_w = 0.0    # Reward for wrong at L_gen = L_max
+    r_e = -10.0   # Exceed length penalty
+
+    # Handle the case where L_gen >= L_max first
+    if L_gen >= L_max:
+        return r_e
+    
+    # Handle correct case
+    if C:
+        return cosfn(L_gen, L_max, r0_c, rL_c)
+    # Handle wrong case
+    elif not C:
+        return cosfn(L_gen, L_max, r0_w, rL_w)
+
+
+def compute_score(solution_str, ground_truth, reward_type="classic", tokenizer=None, max_length=None) -> float:
     retval = -1
-    do_print = random.randint(1, 128) == 1
+    correct = False
+    answer = "None"
+    do_print = random.randint(1, 256) == 1
     try:
-        string_in_last_boxed = last_boxed_only_string(solution_str)
-        if string_in_last_boxed is not None:
-            answer = remove_boxed(string_in_last_boxed)
-            if is_equiv(answer, ground_truth['target']):
-                retval = 1.
+        answer = extract_answer_math(solution_str)
+        if answer == ground_truth['target']:
+            retval = 1.
+            correct = True
     except Exception as e:
-        # retval = -1.
-        answer = "None"
         print(e)
+
+    if reward_type == "cosine":
+        length = min(len(tokenizer.tokenize(solution_str)), max_length)  # Clip to max_length
+        retval = cosine_reward_function(correct, length, max_length)
 
     if do_print:
         print(f"--------------------------------")
@@ -35,14 +87,7 @@ def compute_score(solution_str, ground_truth) -> float:
         print(f"Solution: {solution_str}")
         print(f"Ground Truth: {ground_truth['target']}")
         print(f"Extracted answer: {answer}")
-        if retval == 1.:
-            print(f"Correct answer! Reward = {retval}")
-        else:
-            print(f"Incorrect answer. Reward = {retval}")
-        # elif retval == -0.5:
-        #     print("Incorrect answer. Reward - 0.5")
-        # else:
-        #     print("Fail to extract answer. Reward - 1")
+        print(f"{'Correct' if correct else 'Incorrect'} answer! Reward = {retval}")
 
     return retval
 

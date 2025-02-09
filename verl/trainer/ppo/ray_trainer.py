@@ -373,7 +373,7 @@ class RayPPOTrainer(object):
         self.val_dataloader = DataLoader(dataset=self.val_dataset,
                                          batch_size=len(self.val_dataset),
                                          shuffle=True,
-                                         drop_last=True,
+                                         drop_last=False,
                                          collate_fn=collate_fn)
 
         assert len(self.train_dataloader) >= 1
@@ -580,9 +580,9 @@ class RayPPOTrainer(object):
         # we start from step 1
         self.global_steps += 1
 
-        for epoch in range(self.config.trainer.total_epochs):
+        for epoch in tqdm(range(self.config.trainer.total_epochs)):
             print("-" * 30 + f'Epoch: {epoch}' + "-" * 30)
-            for batch_dict in tqdm(self.train_dataloader):
+            for batch_dict in self.train_dataloader:
                 metrics = {}
                 timing_raw = {}
 

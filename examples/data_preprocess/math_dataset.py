@@ -17,21 +17,23 @@ Preprocess the GSM8k dataset to parquet format
 
 import os
 import datasets
+import json
 
 from verl.utils.hdfs_io import copy, makedirs
 import argparse
 
-from verl.utils.reward_score.math import remove_boxed, last_boxed_only_string
+from verl.utils.reward_score.utils import extract_answer_math
 
-
-def extract_solution(solution_str):
-    return remove_boxed(last_boxed_only_string(solution_str))
+def filter_dataset(dataset, question_ids):
+    dataset = dataset.select(question_ids)
+    return dataset
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--local_dir', default='~/data/math')
     parser.add_argument('--hdfs_dir', default=None)
+    parser.add_argument('--filter_file', type=str, default=None)
 
     args = parser.parse_args()
 
@@ -41,6 +43,11 @@ if __name__ == '__main__':
 
     train_dataset = dataset['train']
     test_dataset = dataset['test']
+
+    if args.filter_file is not None:
+        with open(args.filter_file, "r") as f:
+            question_ids = json.load(f)
+        train_dataset = filter_dataset(train_dataset, question_ids)
 
     instruction_following = "Let's think step by step and output the final answer within \\boxed{}."
 
@@ -52,12 +59,12 @@ if __name__ == '__main__':
 
             question = question + ' ' + instruction_following
 
-            answer = example.pop('solution')
-            solution = extract_solution(answer)
+            solution = example.pop('solution')
+            answer = extract_answer_math(solution)
             solution = {
                 "question": question,
-                "solution": answer,
-                "target": solution
+                "solution": solution,
+                "target": answer,
             }
             data = {
                 "data_source": data_source,
