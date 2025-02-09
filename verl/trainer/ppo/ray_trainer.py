@@ -373,7 +373,7 @@ class RayPPOTrainer(object):
         self.val_dataloader = DataLoader(dataset=self.val_dataset,
                                          batch_size=len(self.val_dataset),
                                          shuffle=True,
-                                         drop_last=False,
+                                         drop_last=True,
                                          collate_fn=collate_fn)
 
         assert len(self.train_dataloader) >= 1
@@ -398,6 +398,7 @@ class RayPPOTrainer(object):
 
     def _validate(self):
         reward_tensor_lst = []
+        train_reward_tensor_lst = []
         data_source_lst = []
         for test_data in self.val_dataloader:
             test_batch = DataProto.from_single_dict(test_data)
@@ -428,23 +429,32 @@ class RayPPOTrainer(object):
             # evaluate using reward_function
             # for certain reward function (e.g. sandbox), the generation can overlap with reward
             reward_tensor = self.val_reward_fn(test_batch)
+            train_reward_tensor = self.reward_fn(test_batch)
 
             reward_tensor_lst.append(reward_tensor)
+            train_reward_tensor_lst.append(train_reward_tensor)
             data_source_lst.append(test_batch.non_tensor_batch.get('data_source', ['unknown'] * reward_tensor.shape[0]))
 
         reward_tensor = torch.cat(reward_tensor_lst, dim=0).sum(-1).cpu()  # (batch_size,)
+        train_reward_tensor = torch.cat(train_reward_tensor_lst, dim=0).sum(-1).cpu()
         data_sources = np.concatenate(data_source_lst, axis=0)
         # evaluate test_score based on data source
         data_source_reward = {}
+        data_source_train_reward = {}
+        assert reward_tensor.shape[0] == train_reward_tensor.shape[0]
         for i in range(reward_tensor.shape[0]):
             data_source = data_sources[i]
             if data_source not in data_source_reward:
                 data_source_reward[data_source] = []
+                data_source_train_reward[data_source] = []
             data_source_reward[data_source].append(reward_tensor[i].item())
+            data_source_train_reward[data_source].append(train_reward_tensor[i].item())
 
         metric_dict = {}
         for data_source, rewards in data_source_reward.items():
             metric_dict[f'val/test_score/{data_source}'] = np.mean(rewards)
+        for data_source, rewards in data_source_train_reward.items():
+            metric_dict[f'val/test_score_based_on_train_reward_fn/{data_source}'] = np.mean(rewards)
 
         return metric_dict
 

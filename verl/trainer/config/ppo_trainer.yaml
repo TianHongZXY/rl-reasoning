@@ -143,6 +143,7 @@ reward_model:
   use_dynamic_bsz: ${critic.use_dynamic_bsz}
   forward_max_token_len_per_gpu: ${critic.forward_max_token_len_per_gpu}
   reward_type: ${reward_model.reward_type}
+  val_reward_type: ${reward_model.val_reward_type}
 
 algorithm:
   gamma: 1.0

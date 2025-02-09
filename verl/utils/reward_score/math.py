@@ -35,9 +35,9 @@ def cosfn(t, T, eta_min, eta_max):
 
 def linear_length_reward_function(C, L_gen, L_max):
     if C:
-        return -0.5 * L_gen / L_max
+        return  1 - 0.5 * L_gen / L_max
     else:
-        return 0.5 * L_gen / L_max
+        return -1 + 0.5 * L_gen / L_max
 
 
 def cosine_reward_function(C, L_gen, L_max):
@@ -89,7 +89,7 @@ def compute_score(solution_str, ground_truth, reward_type="classic", tokenizer=N
         length = min(len(tokenizer.tokenize(solution_str)), max_length)  # Clip to max_length
         retval = linear_length_reward_function(correct, length, max_length)
     elif reward_type == "classic":
-        retval = 1. if correct else 0.
+        retval = 1. if correct else -1
     else:
         raise ValueError(f"Unknown reward type: {reward_type}")
 
