@@ -225,6 +225,8 @@ class DataParallelPPOActor(BasePPOActor):
             else:
                 self.gradient_accumulation = self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
                 # split batch into micro_batches
+                # TensorDict.split(n: int) is used to split a TensorDict into smaller TensorDict
+                # If a td had 6 elements, td.split(2) would return three TensorDicts of size 2 each.
                 micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
 
             self.actor_optimizer.zero_grad()

@@ -36,8 +36,34 @@ from verl.single_controller.ray.base import create_colocated_worker_cls
 from verl.trainer.ppo import core_algos
 from verl.utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from tqdm import tqdm
+import torch
 
 WorkerType = Type[Worker]
+
+
+def make_divisible(td, batch_size, remainder):
+    """
+    Ensures the batch size of a TensorDict is divisible by world_size.
+    If not, randomly drops the minimal number of extra rows.
+
+    Args:
+        td (TensorDict): The input TensorDict after filtering.
+        remainder (int): The number of extra rows to drop if the batch size is not divisible.
+    Returns:
+        mask (torch.BoolTensor): A mask indicating which rows to keep.
+    """
+
+    # Compute the number of extra rows to drop
+    num_to_drop = remainder  # Drop the least amount to make it divisible
+
+    # Randomly select `num_to_drop` indices to remove
+    drop_indices = torch.randperm(batch_size)[:num_to_drop]  # Shuffle and pick indices
+
+    # Create a mask to keep only non-dropped indices
+    mask = torch.ones(batch_size, dtype=torch.bool)
+    mask[drop_indices] = False  # Mark indices for dropping
+
+    return mask
 
 
 class Role(Enum):
@@ -587,12 +613,13 @@ class RayPPOTrainer(object):
             if self.config.trainer.get('val_only', False):
                 return
 
-        # we start from step 1
-        self.global_steps += 1
+        # we start from step 1 -- previous implementation will cause last step not saved
+        # self.global_steps += 1
 
         for epoch in tqdm(range(self.config.trainer.total_epochs)):
             print("-" * 30 + f'Epoch: {epoch}' + "-" * 30)
             for batch_dict in self.train_dataloader:
+                self.global_steps += 1
                 metrics = {}
                 timing_raw = {}
 
@@ -665,6 +692,29 @@ class RayPPOTrainer(object):
                         else:
                             batch.batch['token_level_rewards'] = batch.batch['token_level_scores']
 
+                        # NOTE a hack to drop correct ones
+                        # mask = batch.batch['token_level_scores'][:, 0] != 1
+                        # token_level_scores shape: (batch_size, valid_response_length), if it's correct, token_level_scores[i, valid_response_length - 1] == 1
+                        # This is also why when the model correctly answer the question, it still generate to the limit, because the score is 1 for the final token
+                        # mask = batch.batch['token_level_scores'].sum(-1) != 1
+                        # # print("mask: ", mask)
+                        # total_rows = batch.batch.batch_size[0]  # Total number of rows before filtering
+                        # kept_rows = mask.sum().item()  # Number of rows that remain after filtering
+                        # dropped_rows = total_rows - kept_rows  # Compute dropped rows
+                        # if dropped_rows > 0:
+                        #     print(f'Dropped {dropped_rows} correct rows! Total rows: {total_rows}, kept rows: {kept_rows}')
+                        #     batch.batch = batch.batch[mask]
+                        #     batch.non_tensor_batch = {key: value[mask] for key, value in batch.non_tensor_batch.items()}
+                        #     # print(f"Before meta_info: {batch.meta_info}")
+                        #     remainder = kept_rows % self.actor_rollout_wg.world_size
+                        #     if remainder != 0:
+                        #         divisible_mask = make_divisible(batch.batch, batch.batch.batch_size[0], remainder)
+                        #         # print("divisible_mask: ", divisible_mask)
+                        #         batch.batch = batch.batch[divisible_mask]
+                        #         batch.non_tensor_batch = {key: value[divisible_mask] for key, value in batch.non_tensor_batch.items()}
+                        #         batch.meta_info['global_token_num'] = torch.sum(batch.batch['attention_mask'], dim=-1).tolist()
+                            # print(f"After meta_info: {batch.meta_info}")
+
                         # compute advantages, executed on the driver process
                         batch = compute_advantage(batch,
                                                   adv_estimator=self.config.algorithm.adv_estimator,
@@ -700,14 +750,13 @@ class RayPPOTrainer(object):
                         with _timer('save_checkpoint', timing_raw):
                             self._save_checkpoint()
 
+                metrics["seen_examples"] = self.global_steps * self.config.data.train_batch_size
                 # collect metrics
                 metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
 
                 # TODO: make a canonical logger that supports various backend
-                logger.log(data=metrics, step=self.global_steps)
-
-                self.global_steps += 1
+                logger.log(data=metrics, step=self.global_steps, commit=True if self.global_steps < self.total_training_steps else False)
 
                 if self.global_steps >= self.total_training_steps:
 
@@ -715,5 +764,5 @@ class RayPPOTrainer(object):
                     if self.val_reward_fn is not None:
                         val_metrics = self._validate()
                         pprint(f'Final validation metrics: {val_metrics}')
-                        logger.log(data=val_metrics, step=self.global_steps)
-                    return
+                        logger.log(data=val_metrics, step=self.global_steps, commit=True)
+                    # return

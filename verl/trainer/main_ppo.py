@@ -14,6 +14,17 @@
 """
 Note that we don't combine the main with ray_trainer as ray_trainer is used by other main.
 """
+import os
+
+# Set environment variables to control temp/cache paths
+os.environ["TMPDIR"] = "/p/llmresearch/thh9bk/verl/tmp"  # Affects tempfile
+# os.environ["HF_HOME"] = "/p/llmresearch/verl/huggingface"  # HuggingFace cache
+os.environ["TORCH_HOME"] = "/p/llmresearch/thh9bk/verl/torch_cache"  # PyTorch cache
+
+# Create these directories if they don't exist
+os.makedirs(os.environ["TMPDIR"], exist_ok=True)
+# os.makedirs(os.environ["HF_HOME"], exist_ok=True)
+os.makedirs(os.environ["TORCH_HOME"], exist_ok=True)
 
 from verl import DataProto
 import torch
@@ -152,6 +163,11 @@ def main_task(config):
         Role.Critic: global_pool_id,
         Role.RefPolicy: global_pool_id,
     }
+
+    if config.algorithm.adv_estimator == "grpo" and config.actor_rollout_ref.actor.use_kl_loss == False and config.actor_rollout_ref.actor.kl_loss_coef == 0.0:
+        print("Using GRPO without KL loss, remove RefPolicy!")
+        del role_worker_mapping[Role.RefPolicy]
+        del mapping[Role.RefPolicy]
 
     # we should adopt a multi-source reward function here
     # - for rule-based rm, we directly call a reward score
